@@ -3,6 +3,12 @@ sensor_name: "<%= @sensor_name %>"
 sensor_ip: "<%= @sensor_ip %>"
 tag: "traffic"
 tag2: "<%= @observation_id || 0 %>"
+<% if @enrichment && !@enrichment.empty? %>
+enrichments:
+<% @enrichment.each do |key, value| %>
+  <%= key %>: "<%= value %>"
+<% end %>
+<% end %>
 home_nets:
 <% @home_nets.each do |net| %>
   - "<%= net %>"
@@ -32,15 +38,24 @@ analysis:
   extract_dns_domains: true
   dns_cache_size: 50000
 flow:
-  mode: "bidirectional"
+  mode: "<%= @flow_mode %>"
   active_timeout_sec: 30
   inactive_timeout_sec: 15
 exporter:
   type: "<%= @exporter_type %>"
+<% if @exporter_type == "kafka" %>
+kafka:
+  brokers:
+<% @kafka_brokers.each do |broker| %>
+    - "<%= broker %>"
+<% end %>
+  topic: "<%= @kafka_topic %>"
+<% else %>
   target: "<%= @target_host %>"
   port: <%= @target_port %>
 <% if @exporter_type == "sflow" && @sampling_rate && @sampling_rate.to_i > 0 %>
   sflow_sampling_rate: <%= @sampling_rate.to_i %>
+<% end %>
 <% end %>
 <% if @observation_id_filters && !@observation_id_filters.empty? && !@split_traffic_logstash %>
 sensors:

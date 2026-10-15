@@ -55,6 +55,16 @@ action :add do
       end
     end
 
+    # Only the per interface instances (redborder-flow-agent@<iface>) are used.
+    # Older packages shipped an example config.yaml (stdout exporter) for the plain unit.
+    service 'redborder-flow-agent' do
+      action [:stop, :disable]
+    end
+
+    file "#{config_dir}/config.yaml" do
+      action :delete
+    end
+
     directory config_dir do
       owner 'root'
       group 'root'
@@ -89,7 +99,28 @@ action :add do
           action :nothing
         end
 
-        if iface['dstAddress'] && !iface['dstAddress'].empty?
+        has_dst = iface['dstAddress'] && !iface['dstAddress'].empty?
+        protocol_raw = (iface['protocol_type'] || 'NetFlow v9').to_s.downcase
+        kafka = protocol_raw == 'kafka'
+        observation_id = iface['observationId'] && !iface['observationId'].empty? ? iface['observationId'] : '0'
+        flow_sensor = flow_agent_flow_sensor(observation_id)
+
+        # webui stores 'Enable'/'Disable'. Interfaces saved before the switch existed
+        # run when they have a destination address; span ports are enabled by default.
+        enabled = case iface['flow_agent'].to_s
+                  when 'Enable' then true
+                  when 'Disable' then false
+                  else has_dst || iface['iface_type'] == 'Span Port'
+                  end
+        # NetFlow and sFlow need a destination
+        enabled &&= kafka || has_dst
+        # Kafka flows need the flow sensor enrichment, f2k also drops flows from unknown sensors
+        if enabled && kafka && flow_sensor.nil?
+          Chef::Log.warn("rb-flow-agent: no flow sensor with ip #{node['ipaddress']} and observation id #{observation_id}, #{service_name} not started")
+          enabled = false
+        end
+
+        if enabled
           execute "iface_restart_#{iface_key}" do
             command "ifconfig #{iface_key} down && ifconfig #{iface_key} up"
             ignore_failure false
@@ -107,11 +138,9 @@ action :add do
             notifies :run, "execute[iface_restart_#{iface_key}]", :immediately if iface_key != 'eth0'
           end
 
-          dst_parts = iface['dstAddress'].to_s.split(':')
-          target_host = dst_parts[0]
-          protocol_raw = (iface['protocol_type'] || 'NetFlow v9').to_s.downcase
-
-          exporter_type = if protocol_raw.include?('sflow')
+          exporter_type = if kafka
+                            'kafka'
+                          elsif protocol_raw.include?('sflow')
                             'sflow'
                           elsif protocol_raw.include?('10') || protocol_raw.include?('ipfix')
                             'ipfix'
@@ -121,12 +150,24 @@ action :add do
                             'netflow9'
                           end
 
+          dst_parts = iface['dstAddress'].to_s.split(':')
+          target_host = dst_parts[0]
           default_port = (exporter_type == 'sflow') ? 6343 : 2055
           target_port = dst_parts[1] && !dst_parts[1].empty? ? dst_parts[1].to_i : default_port
 
-          observation_id = iface['observationId'] && !iface['observationId'].empty? ? iface['observationId'] : '0'
+          if kafka
+            # Same sensor identity and enrichment f2k gave to the flows
+            sensor_name = flow_sensor['rbname'] || flow_sensor.name
+            sensor_ip = flow_sensor['ipaddress']
+            enrichment = flow_agent_enrichment(flow_sensor)
+          else
+            sensor_name = node['rbname'] || 'sensor'
+            sensor_ip = node['ipaddress'] || '127.0.0.1'
+            enrichment = {}
+          end
+
           observation_id_filters = iface['observation_id_filters'] || []
-          home_nets = flow_agent_home_nets(observation_id)
+          home_nets = flow_agent_home_nets(flow_sensor)
 
           template "#{config_dir}/#{iface_key}.yaml" do
             source 'redborder-flow-agent.yaml.erb'
@@ -135,8 +176,9 @@ action :add do
             group 'root'
             mode '0644'
             variables(
-              sensor_name: node['rbname'] || 'sensor',
-              sensor_ip: node['ipaddress'] || '127.0.0.1',
+              sensor_name: sensor_name,
+              sensor_ip: sensor_ip,
+              enrichment: enrichment,
               iface: iface_key,
               observation_id: observation_id,
               observation_id_filters: observation_id_filters,
@@ -146,7 +188,11 @@ action :add do
               exporter_type: exporter_type,
               target_host: target_host,
               target_port: target_port,
+              kafka_brokers: ["kafka.service:#{node.dig('redborder', 'kafka', 'port') || 9092}"],
+              kafka_topic: 'rb_flow',
               sampling_rate: iface['sampling_rate'],
+              # unidirectional = upstream + downstream records like f2k (default)
+              flow_mode: iface['flow_mode'].to_s.casecmp('bidirectional').zero? ? 'bidirectional' : 'unidirectional',
               home_nets: home_nets
             )
             notifies :restart, "service[#{service_name}]", :delayed
