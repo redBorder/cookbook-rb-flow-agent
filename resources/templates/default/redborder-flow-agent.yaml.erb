@@ -1,0 +1,56 @@
+sensor: "<%= @sensor_name %>"
+sensor_name: "<%= @sensor_name %>"
+sensor_ip: "<%= @sensor_ip %>"
+tag: "traffic"
+tag2: "<%= @observation_id || 0 %>"
+home_nets:
+<% @home_nets.each do |net| %>
+  - "<%= net %>"
+<% end %>
+<% if (@cores && !@cores.to_s.empty? && @cores.to_i > 0) || (@cpu_affinity && !@cpu_affinity.to_s.strip.empty?) %>
+system:
+<% if @cores && !@cores.to_s.empty? && @cores.to_i > 0 %>
+  cores: <%= @cores.to_i %>
+<% end %>
+<% if @cpu_affinity && !@cpu_affinity.to_s.strip.empty? %>
+  cpu_affinity: "<%= @cpu_affinity %>"
+<% end %>
+<% end %>
+capture:
+  interfaces:
+    - "<%= @iface %>"
+  promiscuous: true
+  workers_per_interface: <%= (@cores && @cores.to_i > 0) ? @cores.to_i : 2 %>
+  buffer_size_mb: 16
+analysis:
+  track_open_ports: true
+  track_tcp_metrics: true
+  extract_tls_sni: true
+  extract_tls_version: true
+  extract_http_host: true
+  extract_http_details: true
+  extract_dns_domains: true
+  dns_cache_size: 50000
+flow:
+  mode: "bidirectional"
+  active_timeout_sec: 30
+  inactive_timeout_sec: 15
+exporter:
+  type: "<%= @exporter_type %>"
+  target: "<%= @target_host %>"
+  port: <%= @target_port %>
+<% if @exporter_type == "sflow" && @sampling_rate && @sampling_rate.to_i > 0 %>
+  sflow_sampling_rate: <%= @sampling_rate.to_i %>
+<% end %>
+<% if @observation_id_filters && !@observation_id_filters.empty? && !@split_traffic_logstash %>
+sensors:
+<% @observation_id_filters.each_with_index do |filter, idx| %>
+  - name: "<%= filter['name'] || "split_#{idx}" %>"
+    subnets:
+      - "<%= filter['subnet'] %>"
+    tag2: "<%= filter['observation_id'] %>"
+<% end %>
+<% end %>
+stats:
+  enabled: true
+  socket_path: "/var/run/redborder-flow-agent-<%= @iface %>.sock"

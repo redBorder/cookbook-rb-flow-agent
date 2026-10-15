@@ -1,0 +1,83 @@
+
+$ModLoad imtcp
+
+$InputTCPServerRun 514
+
+module(load="imudp")
+input(type="imudp" port="514")
+$UDPServerAddress 0.0.0.0
+
+module(load="mmjsonparse")
+module(load="mmpstrucdata")
+
+action(type="mmpstrucdata")
+
+# redborder manager configurations for rsyslog
+
+$LocalHostName <%= node["hostname"] %>
+$PreserveFQDN on
+
+$template DailyPerHostLogs,"/var/log/remote/%HOSTNAME%-%FROMHOST-IP%.log"
+
+#### rsyslog servers configured from redborder interface ####
+
+#Template for ARP formatted logs
+
+set $!usr!tpl2!data = field($rawmsg, "arpwatch: ", 2);
+set $!usr!tpl2!check = field($!usr!tpl2!data, " ", 4);
+
+if ($msg contains 'bogon') then
+{
+        set $!usr!tpl2!type = field($!usr!tpl2!data, " ", 1) & " " & field($!usr!tpl2!data, " ", 2);
+        set $!usr!tpl2!ip = field($!usr!tpl2!data, " ", 3);
+        set $!usr!tpl2!mac = field($!usr!tpl2!data, " ", 4);
+}
+else if ($msg contains 'changed ethernet address') then
+{
+        set $!usr!tpl2!type = field($!usr!tpl2!data, " ", 1) & " " & field($!usr!tpl2!data, " ", 2) & " " & field($!usr!tpl2!data, " ", 3);
+        set $!usr!tpl2!ip = field($!usr!tpl2!data, " ", 4);
+        set $!usr!tpl2!mac = field($!usr!tpl2!data, " ", 5);
+} 
+else if ($msg contains 'reused old ethernet address') or ($msg contains 'suppressed DECnet flip flop') then
+{
+        set $!usr!tpl2!type = field($!usr!tpl2!data, " ", 1) & " " & field($!usr!tpl2!data, " ", 2) & " " & field($!usr!tpl2!data, " ", 3) & " " & field($!usr!tpl2!data, " ", 4);
+        set $!usr!tpl2!ip = field($!usr!tpl2!data, " ", 5);
+        set $!usr!tpl2!mac = field($!usr!tpl2!data, " ", 6);
+}
+else 
+{
+        set $!usr!tpl2!type = field($!usr!tpl2!data, " ", 1) & " " & field($!usr!tpl2!data, " ", 2);
+        set $!usr!tpl2!ip = field($!usr!tpl2!data, " ", 3);
+        set $!usr!tpl2!mac = field($!usr!tpl2!data, " ", 4);
+}
+
+template(name="ARP" type="list"){
+           constant(value="{")
+             constant(value="\"timestamp\":\"")              property(name="timestamp" format="json")
+             constant(value="\",\"type\":\"")                   property(name="$!usr!tpl2!type" format="json")
+             constant(value="\",\"ip\":\"")                     property(name="$!usr!tpl2!ip" format="json")
+             constant(value="\",\"mac\":\"")                    property(name="$!usr!tpl2!mac" format="json")
+#             constant(value="\",\"interface\":\"")              property(name="$!usr!tpl2!interface" format="json")
+           constant(value="\"}")
+        }
+
+#module(load="omhttp")
+if $fromhost-ip == '127.0.0.1' and $app-name == 'arpwatch' and (
+	($rawmsg contains 'new activity') or
+	($rawmsg contains 'new station') or
+	($rawmsg contains 'flip flop') or
+	($rawmsg contains 'changed ethernet address') or
+	($rawmsg contains 'ethernet broadcast') or
+	($rawmsg contains 'ip broadcast') or
+	($rawmsg contains 'ethernet broadcast') or
+	($rawmsg contains 'ethernet mismatch') or
+	($rawmsg contains 'reused old ethernet address') or
+	($rawmsg contains 'suppressed DECnet flip flop')
+) then
+{
+  #Action to send logs to Apache Kafka
+  #action(type="omhttp" server="127.0.0.1" serverport="8080" restpath="/network/Analytics" template="ARP")
+  action(type="omfwd" target="data.<%= node['redborder']['cdomain'] %>" port="514" protocol="tcp" action.resumeRetryCount="100" queue.type="linkedList" queue.size="10000")
+  action(type="omfile" dirCreateMode="0700" FileCreateMode="0644" File="/var/log/arpwatch.log" Template="ARP")
+  stop
+}

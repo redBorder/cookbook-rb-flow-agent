@@ -1,0 +1,13 @@
+DEVICE=<%= @iface %>
+TYPE=Ethernet
+<% if @iface_type == "DHCP" %>
+BOOTPROTO=dhcp
+<% elsif @iface_type == "Static" %>
+BOOTPROTO=static
+IPADDR=<%= @iface_ip %>
+NETMASK=<%= @iface_netmask %>
+GATEWAY=<%= @iface_gateway %>
+<% elsif @iface_type == "Span Port" %>
+PROMISC=yes
+<% end %>
+ONBOOT=yes
