@@ -1,7 +1,5 @@
 module RbFlowAgent
   module Helper
-    DEFAULT_HOME_NETS = %w(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16).freeze
-
     # Same location/organization fields f2k adds to the flows (cookbook-f2k f2k_template_renderer.rb)
     ENRICHMENT_FIELDS = %w(sensor_uuid deployment deployment_uuid namespace namespace_uuid market market_uuid
                            organization organization_uuid service_provider service_provider_uuid campus
@@ -21,9 +19,9 @@ module RbFlowAgent
       nil
     end
 
+    # The agent always treats private ranges (RFC 1918, RFC 6598, ULA) as home, these come on top
     def flow_agent_home_nets(flow_sensor)
-      nets = (flow_sensor && flow_sensor.dig('redborder', 'homenets') || []).map { |h| h['value'] }.compact
-      nets.empty? ? DEFAULT_HOME_NETS : nets
+      (flow_sensor && flow_sensor.dig('redborder', 'homenets') || []).map { |h| h['value'] }.compact
     end
 
     # Fields f2k used to add, now added by the agent itself when it writes to kafka

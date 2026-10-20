@@ -87,8 +87,8 @@ action :add do
     end
 
     if node['redborder'] && node['redborder']['interfaces'] && !node['redborder']['interfaces'].empty?
-      node['redborder']['interfaces'].each do |iface_key, _orig_iface|
-        iface = node['redborder']['interfaces'][iface_key].to_hash.clone
+      node['redborder']['interfaces'].each do |iface_key, iface_attrs|
+        iface = iface_attrs.to_hash
         service_name = "redborder-flow-agent@#{iface_key}"
 
         # webui stores 'Enable'/'Disable'
@@ -123,7 +123,6 @@ action :add do
         if enabled
           execute "iface_restart_#{iface_key}" do
             command "ifconfig #{iface_key} down && ifconfig #{iface_key} up"
-            ignore_failure false
             action :nothing
           end
 
@@ -136,6 +135,23 @@ action :add do
             retries 2
             variables(iface: iface_key, iface_type: iface['iface_type'], iface_ip: iface['iface_ip'], iface_netmask: iface['iface_netmask'], iface_gateway: iface['iface_gateway'])
             notifies :run, "execute[iface_restart_#{iface_key}]", :immediately if iface_key != 'eth0'
+          end
+
+          # A dhclient left from when the port was DHCP keeps its IPs and default route,
+          # then Ohai reports the span port as default_interface (management and capture swap)
+          if iface['iface_type'] == 'Span Port' && iface_key != 'eth0'
+            dhclient_pattern = "dhclient .*[[:space:]]#{iface_key}$"
+
+            execute "span_port_stop_dhclient_#{iface_key}" do
+              command "pkill -f '#{dhclient_pattern}'"
+              only_if "pgrep -f '#{dhclient_pattern}'"
+              returns [0, 1]
+            end
+
+            execute "span_port_flush_ipv4_#{iface_key}" do
+              command "ip -4 addr flush dev #{iface_key}"
+              only_if "ip -4 -o addr show dev #{iface_key} | grep -q inet"
+            end
           end
 
           exporter_type = if kafka
@@ -165,9 +181,36 @@ action :add do
             sensor_ip = node['ipaddress'] || '127.0.0.1'
             enrichment = {}
           end
-
-          observation_id_filters = iface['observation_id_filters'] || []
           home_nets = flow_agent_home_nets(flow_sensor)
+
+          # Subnet to Observation Id: in kafka mode each subnet gets its own flow sensor identity.
+          # NetFlow/sFlow only carry tag2, f2k/logstash map it to the flow sensor.
+          observation_id_filters = iface['observation_id_filters'] || []
+          if kafka && !split_traffic_logstash
+            observation_id_filters = observation_id_filters.map(&:to_hash).filter_map do |filter|
+              split_sensor = flow_agent_flow_sensor(filter['observation_id'])
+              if split_sensor.nil?
+                Chef::Log.warn("rb-flow-agent: no flow sensor with ip #{node['ipaddress']} and observation id #{filter['observation_id']}, #{filter['subnet']} stays on the main flow sensor of #{iface_key}")
+                next
+              end
+              split_enrichment = flow_agent_enrichment(split_sensor)
+              # The agent merges these over the main sensor's enrichment, blank what this sensor lacks
+              (enrichment.keys - split_enrichment.keys).each { |k| split_enrichment[k] = '' }
+              # Only one home_nets list in the agent
+              home_nets |= flow_agent_home_nets(split_sensor)
+              filter.merge('name' => split_sensor['rbname'] || split_sensor.name, 'sensor_ip' => split_sensor['ipaddress'], 'enrichment' => split_enrichment)
+            end
+          end
+
+          # nil when not set, so the template leaves them out
+          cores = iface['cores'].to_i.positive? ? iface['cores'].to_i : nil
+          cpu_affinity = iface['cpu_affinity'].to_s.strip.empty? ? nil : iface['cpu_affinity'].to_s.strip
+          sampling_rate = iface['sampling_rate'].to_i.positive? ? iface['sampling_rate'].to_i : nil
+          # Observation domain f2k maps to the flow sensor (agent default 1001). v5 only has the
+          # 8 bit engine_type for it, like rb-exporter's nfprobe_engine <id>:0. sFlow has no field.
+          obs_num = observation_id.to_s =~ /\A\d+\z/ ? observation_id.to_i : nil
+          obs_num = nil if obs_num && obs_num > (exporter_type == 'netflow5' ? 255 : 4_294_967_295)
+          Chef::Log.warn("rb-flow-agent: observation id #{observation_id} not usable for #{exporter_type} on #{iface_key}") if obs_num.nil? && %w(netflow5 netflow9 ipfix).include?(exporter_type)
 
           template "#{config_dir}/#{iface_key}.yaml" do
             source 'redborder-flow-agent.yaml.erb'
@@ -183,14 +226,15 @@ action :add do
               observation_id: observation_id,
               observation_id_filters: observation_id_filters,
               split_traffic_logstash: split_traffic_logstash,
-              cores: iface['cores'],
-              cpu_affinity: iface['cpu_affinity'],
+              cores: cores,
+              cpu_affinity: cpu_affinity,
               exporter_type: exporter_type,
               target_host: target_host,
               target_port: target_port,
               kafka_brokers: ["kafka.service:#{node.dig('redborder', 'kafka', 'port') || 9092}"],
               kafka_topic: 'rb_flow',
-              sampling_rate: iface['sampling_rate'],
+              sampling_rate: sampling_rate,
+              obs_num: obs_num,
               # unidirectional = upstream + downstream records like f2k (default)
               flow_mode: iface['flow_mode'].to_s.casecmp('bidirectional').zero? ? 'bidirectional' : 'unidirectional',
               home_nets: home_nets
