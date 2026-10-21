@@ -56,7 +56,7 @@ action :add do
     end
 
     # Only the per interface instances (redborder-flow-agent@<iface>) are used.
-    # Older packages shipped an example config.yaml (stdout exporter) for the plain unit.
+    # The package ships an example config.yaml (eth0, stdout exporter) for the plain unit.
     service 'redborder-flow-agent' do
       action [:stop, :disable]
     end
