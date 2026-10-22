@@ -6,7 +6,6 @@ include RbFlowAgent::Helper
 action :add do
   begin
     config_dir = new_resource.config_dir
-    split_traffic_logstash = new_resource.split_traffic_logstash
 
     # nDPI build (static, no libndpi needed). Flavors ship the same files, so drop the others first
     %w(redborder-flow-agent redborder-flow-agent-ndpi).each do |pkg|
@@ -184,9 +183,9 @@ action :add do
           home_nets = flow_agent_home_nets(flow_sensor)
 
           # Subnet to Observation Id: in kafka mode each subnet gets its own flow sensor identity.
-          # NetFlow/sFlow only carry tag2, f2k/logstash map it to the flow sensor.
+          # NetFlow/sFlow only carry tag2.
           observation_id_filters = iface['observation_id_filters'] || []
-          if kafka && !split_traffic_logstash
+          if kafka
             observation_id_filters = observation_id_filters.map(&:to_hash).filter_map do |filter|
               split_sensor = flow_agent_flow_sensor(filter['observation_id'])
               if split_sensor.nil?
@@ -225,7 +224,6 @@ action :add do
               iface: iface_key,
               observation_id: observation_id,
               observation_id_filters: observation_id_filters,
-              split_traffic_logstash: split_traffic_logstash,
               cores: cores,
               cpu_affinity: cpu_affinity,
               exporter_type: exporter_type,

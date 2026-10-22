@@ -52,7 +52,7 @@ kafka:
   sflow_sampling_rate: <%= @sampling_rate %>
 <% end %>
 <% end %>
-<% if @observation_id_filters.any? && !@split_traffic_logstash %>
+<% if @observation_id_filters.any? %>
 sensors:
 <% @observation_id_filters.each_with_index do |filter, idx| %>
   - name: "<%= filter['name'] || "split_#{idx}" %>"
