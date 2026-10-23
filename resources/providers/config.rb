@@ -72,6 +72,52 @@ action :add do
       action :create
     end
 
+    # Run the agent as its own user, like f2k. The package unit runs as root, a drop-in overrides it;
+    # CAP_NET_RAW/CAP_NET_ADMIN from the package unit are enough to capture.
+    flow_agent_user = 'redborder-flow-agent'
+
+    execute 'create_redborder-flow-agent_user' do
+      command "/usr/sbin/useradd -r -M -s /sbin/nologin #{flow_agent_user}"
+      not_if "getent passwd #{flow_agent_user}"
+    end
+
+    directory '/var/log/redborder-flow-agent' do
+      owner flow_agent_user
+      group flow_agent_user
+      mode '0750'
+    end
+
+    execute 'redborder-flow-agent_daemon_reload' do
+      command 'systemctl daemon-reload'
+      action :nothing
+    end
+
+    execute 'redborder-flow-agent_restart_instances' do
+      command "systemctl try-restart 'redborder-flow-agent@*.service'"
+      action :nothing
+    end
+
+    directory '/etc/systemd/system/redborder-flow-agent@.service.d' do
+      mode '0755'
+    end
+
+    # Only root can create the stats socket in /var/run, the user gets its own runtime dir
+    file '/etc/systemd/system/redborder-flow-agent@.service.d/10-user.conf' do
+      content <<~UNIT
+        [Service]
+        User=#{flow_agent_user}
+        Group=#{flow_agent_user}
+        RuntimeDirectory=redborder-flow-agent-%i
+        ExecStart=
+        ExecStart=/usr/bin/redborder-flow-agent --config /etc/redborder-flow-agent/%i.yaml --stats-socket /run/redborder-flow-agent-%i/stats.sock
+      UNIT
+      owner 'root'
+      group 'root'
+      mode '0644'
+      notifies :run, 'execute[redborder-flow-agent_daemon_reload]', :immediately
+      notifies :run, 'execute[redborder-flow-agent_restart_instances]', :delayed
+    end
+
     arp_ifaces = []
 
     # ARP spoofing alerts: arpwatch logs are forwarded to the manager by rsyslog
@@ -233,8 +279,9 @@ action :add do
               kafka_topic: 'rb_flow',
               sampling_rate: sampling_rate,
               obs_num: obs_num,
-              # unidirectional = upstream + downstream records like f2k (default)
-              flow_mode: iface['flow_mode'].to_s.casecmp('bidirectional').zero? ? 'bidirectional' : 'unidirectional',
+              # unidirectional = upstream + downstream records like f2k (default); bidirectional only
+              # with kafka, NetFlow / IPFIX / sFlow count one direction per record
+              flow_mode: kafka && iface['flow_mode'].to_s.casecmp('bidirectional').zero? ? 'bidirectional' : 'unidirectional',
               home_nets: home_nets
             )
             notifies :restart, "service[#{service_name}]", :delayed
@@ -304,6 +351,17 @@ action :remove do
       recursive true
       action :delete
       only_if { ::Dir.exist?(config_dir) }
+    end
+
+    directory '/etc/systemd/system/redborder-flow-agent@.service.d' do
+      recursive true
+      action :delete
+      notifies :run, 'execute[redborder-flow-agent_daemon_reload]', :immediately
+    end
+
+    execute 'redborder-flow-agent_daemon_reload' do
+      command 'systemctl daemon-reload'
+      action :nothing
     end
 
     Chef::Log.info('redborder-flow-agent removed')
