@@ -300,7 +300,7 @@ action :add do
           service "stop_disable_#{service_name}" do
             service_name service_name
             action [:stop, :disable]
-            only_if { ::File.exist?("/usr/lib/systemd/system/redborder-flow-agent@.service") }
+            only_if { ::File.exist?('/usr/lib/systemd/system/redborder-flow-agent@.service') }
           end
         end
       end
