@@ -1,76 +1,82 @@
-sensor_name: "<%= @sensor_name %>"
-sensor_ip: "<%= @sensor_ip %>"
-tag: "traffic"
-tag2: "<%= @observation_id %>"
-<% if @enrichment.any? %>
+<%# Full config, every key even when it is the default, so the names are easy to find. Strings as JSON = valid YAML. %>
+<% s = @settings %>
+sensor_name: <%= @sensor_name.to_s.to_json %>
+sensor_ip: <%= @sensor_ip.to_s.to_json %>
+tag: ""
+tag2: ""
 enrichments:
 <% @enrichment.each do |key, value| %>
-  <%= key %>: "<%= value %>"
+  <%= key %>: <%= value.to_s.to_json %>
 <% end %>
-<% end %>
-<% if @home_nets.any? %>
+
 home_nets:
 <% @home_nets.each do |net| %>
-  - "<%= net %>"
+  - <%= net.to_json %>
 <% end %>
-<% end %>
-<% if @cores || @cpu_affinity %>
-system:
-<% if @cores %>
-  cores: <%= @cores %>
-<% end %>
-<% if @cpu_affinity %>
-  cpu_affinity: "<%= @cpu_affinity %>"
-<% end %>
-<% end %>
-capture:
-  interfaces:
-    - "<%= @iface %>"
-  workers_per_interface: <%= @cores || 2 %>
-flow:
-  mode: "<%= @flow_mode %>"
-  active_timeout_sec: 30
-exporter:
-  type: "<%= @exporter_type %>"
-<% if @exporter_type == "kafka" %>
-kafka:
-  brokers:
-<% @kafka_brokers.each do |broker| %>
-    - "<%= broker %>"
-<% end %>
-  topic: "<%= @kafka_topic %>"
-<% else %>
-  target: "<%= @target_host %>"
-  port: <%= @target_port %>
-<% if @obs_num && @exporter_type == "netflow5" %>
-  engine_type: <%= @obs_num %>
-  engine_id: 0
-<% elsif @obs_num && %w(netflow9 ipfix).include?(@exporter_type) %>
-  source_id: <%= @obs_num %>
-<% end %>
-<% if @exporter_type == "sflow" && @sampling_rate %>
-  sflow_sampling_rate: <%= @sampling_rate %>
-<% end %>
-<% end %>
-<% if @observation_id_filters.any? %>
+
 sensors:
-<% @observation_id_filters.each_with_index do |filter, idx| %>
-  - name: "<%= filter['name'] || "split_#{idx}" %>"
-<% if filter['sensor_ip'] %>
-    sensor_name: "<%= filter['name'] %>"
-    sensor_ip: "<%= filter['sensor_ip'] %>"
-<% end %>
+<% @split_sensors.each do |sensor| %>
+  - name: <%= sensor['name'].to_s.to_json %>
+    sensor_ip: <%= sensor['sensor_ip'].to_json %>
     subnets:
-      - "<%= filter['subnet'] %>"
-    tag2: "<%= filter['observation_id'] %>"
-<% if filter['enrichment'] && filter['enrichment'].any? %>
+<% sensor['subnets'].each do |subnet| %>
+      - <%= subnet.to_json %>
+<% end %>
+    tag: ""
+    tag2: ""
     enrichments:
-<% filter['enrichment'].each do |key, value| %>
-      <%= key %>: "<%= value %>"
+<% sensor['enrichments'].each do |key, value| %>
+      <%= key %>: <%= value.to_s.to_json %>
 <% end %>
 <% end %>
-<% end %>
-<% end %>
+
+system:
+  cores: <%= @cores %>
+  cpu_affinity: <%= @cpu_affinity.to_json %>
+
 stats:
   enabled: true
-  socket_path: "/run/redborder-flow-agent-<%= @iface %>/stats.sock"
+  socket_path: <%= @stats_socket_path.to_json %>
+  http_addr: <%= s['stats_http_addr'].to_json %>
+
+capture:
+  interfaces:
+    - <%= @iface.to_json %>
+  promiscuous: <%= s['promiscuous'] %>
+  snaplen: <%= s['snaplen'] %>
+  workers_per_interface: <%= s['workers_per_interface'] %>
+  buffer_size_mb: <%= s['buffer_size_mb'] %>
+
+analysis:
+  track_open_ports: <%= s['track_open_ports'] %>
+  track_tcp_metrics: <%= s['track_tcp_metrics'] %>
+  extract_tls_sni: <%= s['extract_tls_sni'] %>
+  extract_tls_version: <%= s['extract_tls_version'] %>
+  extract_http_host: <%= s['extract_http_host'] %>
+  extract_http_details: <%= s['extract_http_details'] %>
+  extract_dns_domains: <%= s['extract_dns_domains'] %>
+  dns_cache_size: <%= s['dns_cache_size'] %>
+  ja4_signatures_file: <%= @ja4_signatures_file.to_json %>
+
+flow:
+  mode: <%= @flow_mode.to_json %>
+  active_timeout_sec: <%= s['active_timeout_sec'] %>
+  inactive_timeout_sec: <%= s['inactive_timeout_sec'] %>
+  max_active_flows: <%= s['max_active_flows'] %>
+  shards: <%= s['shards'] %>
+
+exporter:
+  type: <%= @exporter_type.to_json %>
+  target: <%= @target_host.to_json %>
+  port: <%= @target_port %>
+  engine_id: <%= s['engine_id'] %>
+  engine_type: <%= @engine_type %>
+  source_id: <%= @source_id %>
+  template_interval_sec: <%= s['template_interval_sec'] %>
+  sflow_sampling_rate: <%= @sampling_rate %>
+
+kafka:
+  brokers: <%= @kafka_brokers.to_json %>
+  topic: <%= @kafka_topic.to_json %>
+  batch_size: <%= s['batch_size'] %>
+  compression: <%= s['compression'].to_json %>

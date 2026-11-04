@@ -6,6 +6,10 @@ include RbFlowAgent::Helper
 action :add do
   begin
     config_dir = new_resource.config_dir
+    user = new_resource.user
+    log_dir = new_resource.log_dir
+    ja4_signatures_file = new_resource.ja4_signatures_file
+    kafka_brokers = ["kafka.service:#{node.dig('redborder', 'kafka', 'port') || new_resource.kafka_port}"]
 
     # nDPI build (static, no libndpi needed). Flavors ship the same files, so drop the others first
     %w(redborder-flow-agent redborder-flow-agent-ndpi).each do |pkg|
@@ -74,16 +78,14 @@ action :add do
 
     # Run the agent as its own user, like f2k. The package unit runs as root, a drop-in overrides it;
     # CAP_NET_RAW/CAP_NET_ADMIN from the package unit are enough to capture.
-    flow_agent_user = 'redborder-flow-agent'
-
     execute 'create_redborder-flow-agent_user' do
-      command "/usr/sbin/useradd -r -M -s /sbin/nologin #{flow_agent_user}"
-      not_if "getent passwd #{flow_agent_user}"
+      command "/usr/sbin/useradd -r -M -s /sbin/nologin #{user}"
+      not_if "getent passwd #{user}"
     end
 
-    directory '/var/log/redborder-flow-agent' do
-      owner flow_agent_user
-      group flow_agent_user
+    directory log_dir do
+      owner user
+      group user
       mode '0750'
     end
 
@@ -97,19 +99,31 @@ action :add do
       action :nothing
     end
 
+    # JA4 signature database the configs point to. The cookbook owns it, the package doesn't
+    # ship it; updated signatures reach the sensors with the cookbook.
+    cookbook_file ja4_signatures_file do
+      source 'ja4_signatures.yaml'
+      cookbook 'rb-flow-agent'
+      owner 'root'
+      group 'root'
+      mode '0644'
+      notifies :run, 'execute[redborder-flow-agent_restart_instances]', :delayed
+    end
+
     directory '/etc/systemd/system/redborder-flow-agent@.service.d' do
       mode '0755'
     end
 
-    # Only root can create the stats socket in /var/run, the user gets its own runtime dir
+    # Only root can create the stats socket in /var/run, the user gets its own runtime dir.
+    # No --stats-socket here: that flag forces stats on, the config (stats.enabled / socket_path) decides.
     file '/etc/systemd/system/redborder-flow-agent@.service.d/10-user.conf' do
       content <<~UNIT
         [Service]
-        User=#{flow_agent_user}
-        Group=#{flow_agent_user}
+        User=#{user}
+        Group=#{user}
         RuntimeDirectory=redborder-flow-agent-%i
         ExecStart=
-        ExecStart=/usr/bin/redborder-flow-agent --config /etc/redborder-flow-agent/%i.yaml --stats-socket /run/redborder-flow-agent-%i/stats.sock
+        ExecStart=/usr/bin/redborder-flow-agent --config #{config_dir}/%i.yaml
       UNIT
       owner 'root'
       group 'root'
@@ -145,7 +159,7 @@ action :add do
         end
 
         has_dst = iface['dstAddress'] && !iface['dstAddress'].empty?
-        protocol_raw = (iface['protocol_type'] || 'NetFlow v9').to_s.downcase
+        protocol_raw = (iface['protocol_type'] || new_resource.protocol_type).to_s.downcase
         kafka = protocol_raw == 'kafka'
         observation_id = iface['observationId'] && !iface['observationId'].empty? ? iface['observationId'] : '0'
         flow_sensor = flow_agent_flow_sensor(observation_id)
@@ -211,10 +225,10 @@ action :add do
                             'netflow9'
                           end
 
-          dst_parts = iface['dstAddress'].to_s.split(':')
-          target_host = dst_parts[0]
-          default_port = (exporter_type == 'sflow') ? 6343 : 2055
-          target_port = dst_parts[1] && !dst_parts[1].empty? ? dst_parts[1].to_i : default_port
+          # Collector ip:port (export), the kafka output doesn't use it
+          target_host, target_port = iface['dstAddress'].to_s.split(':')
+          target_host = new_resource.target_host if target_host.to_s.empty?
+          target_port = (exporter_type == 'sflow' ? new_resource.sflow_port : new_resource.netflow_port) if target_port.to_s.empty?
 
           if kafka
             # Same sensor identity and enrichment f2k gave to the flows
@@ -222,40 +236,32 @@ action :add do
             sensor_ip = flow_sensor['ipaddress']
             enrichment = flow_agent_enrichment(flow_sensor)
           else
-            sensor_name = node['rbname'] || 'sensor'
-            sensor_ip = node['ipaddress'] || '127.0.0.1'
+            sensor_name = node['rbname'] || new_resource.sensor_name
+            sensor_ip = node['ipaddress']
             enrichment = {}
           end
-          home_nets = flow_agent_home_nets(flow_sensor)
+          # Split traffic: subnets to other flow sensors, only with kafka (NetFlow / sFlow can't carry a sensor)
+          split_sensors, split_nodes = kafka ? flow_agent_split_sensors((iface['split_subnets'] || []).map(&:to_hash), enrichment) : [[], []]
 
-          # Subnet to Observation Id: in kafka mode each subnet gets its own flow sensor identity.
-          # NetFlow/sFlow only carry tag2.
-          observation_id_filters = iface['observation_id_filters'] || []
-          if kafka
-            observation_id_filters = observation_id_filters.map(&:to_hash).filter_map do |filter|
-              split_sensor = flow_agent_flow_sensor(filter['observation_id'])
-              if split_sensor.nil?
-                Chef::Log.warn("rb-flow-agent: no flow sensor with ip #{node['ipaddress']} and observation id #{filter['observation_id']}, #{filter['subnet']} stays on the main flow sensor of #{iface_key}")
-                next
-              end
-              split_enrichment = flow_agent_enrichment(split_sensor)
-              # The agent merges these over the main sensor's enrichment, blank what this sensor lacks
-              (enrichment.keys - split_enrichment.keys).each { |k| split_enrichment[k] = '' }
-              # Only one home_nets list in the agent
-              home_nets |= flow_agent_home_nets(split_sensor)
-              filter.merge('name' => split_sensor['rbname'] || split_sensor.name, 'sensor_ip' => split_sensor['ipaddress'], 'enrichment' => split_enrichment)
-            end
-          end
+          # Home nets of the interface are added to the flow sensors' ones (main and split); one list in the agent
+          home_nets = Array(iface['home_nets']).map(&:to_s).reject(&:empty?)
+          ([flow_sensor] + split_nodes).each { |n| home_nets |= flow_agent_home_nets(n) }
+          settings = flow_agent_settings(iface)
+          # Socket and HTTP are independent: the agent opens each only when its address is set
+          stats_socket_path = settings['stats_socket'] ? "/run/redborder-flow-agent-#{iface_key}/stats.sock" : ''
 
-          # nil when not set, so the template leaves them out
-          cores = iface['cores'].to_i.positive? ? iface['cores'].to_i : nil
-          cpu_affinity = iface['cpu_affinity'].to_s.strip.empty? ? nil : iface['cpu_affinity'].to_s.strip
-          sampling_rate = iface['sampling_rate'].to_i.positive? ? iface['sampling_rate'].to_i : nil
-          # Observation domain f2k maps to the flow sensor (agent default 1001). v5 only has the
-          # 8 bit engine_type for it, like rb-exporter's nfprobe_engine <id>:0. sFlow has no field.
+          cores = iface['cores'].to_i.positive? ? iface['cores'].to_i : new_resource.cores
+          sampling_rate = iface['sampling_rate'].to_i.positive? ? iface['sampling_rate'].to_i : new_resource.sampling_rate
+          # Observation domain f2k maps to the flow sensor. v5 only has the 8 bit engine_type for it,
+          # like rb-exporter's nfprobe_engine <id>:0; v9 / IPFIX the source_id. sFlow has no field.
           obs_num = observation_id.to_s =~ /\A\d+\z/ ? observation_id.to_i : nil
           obs_num = nil if obs_num && obs_num > (exporter_type == 'netflow5' ? 255 : 4_294_967_295)
           Chef::Log.warn("rb-flow-agent: observation id #{observation_id} not usable for #{exporter_type} on #{iface_key}") if obs_num.nil? && %w(netflow5 netflow9 ipfix).include?(exporter_type)
+          engine_type = obs_num && exporter_type == 'netflow5' ? obs_num : new_resource.engine_type
+          source_id = obs_num && %w(netflow9 ipfix).include?(exporter_type) ? obs_num : new_resource.source_id
+          # unidirectional = upstream + downstream records like f2k (default); bidirectional only
+          # with kafka, NetFlow / IPFIX / sFlow count one direction per record
+          flow_mode = kafka && iface['flow_mode'].to_s.casecmp('bidirectional').zero? ? 'bidirectional' : new_resource.flow_mode
 
           template "#{config_dir}/#{iface_key}.yaml" do
             source 'redborder-flow-agent.yaml.erb'
@@ -267,22 +273,23 @@ action :add do
               sensor_name: sensor_name,
               sensor_ip: sensor_ip,
               enrichment: enrichment,
-              iface: iface_key,
-              observation_id: observation_id,
-              observation_id_filters: observation_id_filters,
+              home_nets: home_nets,
+              split_sensors: split_sensors,
               cores: cores,
-              cpu_affinity: cpu_affinity,
+              cpu_affinity: iface['cpu_affinity'].to_s.strip,
+              iface: iface_key,
+              settings: settings,
+              stats_socket_path: stats_socket_path,
+              ja4_signatures_file: ja4_signatures_file,
+              flow_mode: flow_mode,
               exporter_type: exporter_type,
               target_host: target_host,
-              target_port: target_port,
-              kafka_brokers: ["kafka.service:#{node.dig('redborder', 'kafka', 'port') || 9092}"],
-              kafka_topic: 'rb_flow',
+              target_port: target_port.to_i,
+              engine_type: engine_type,
+              source_id: source_id,
               sampling_rate: sampling_rate,
-              obs_num: obs_num,
-              # unidirectional = upstream + downstream records like f2k (default); bidirectional only
-              # with kafka, NetFlow / IPFIX / sFlow count one direction per record
-              flow_mode: kafka && iface['flow_mode'].to_s.casecmp('bidirectional').zero? ? 'bidirectional' : 'unidirectional',
-              home_nets: home_nets
+              kafka_brokers: kafka_brokers,
+              kafka_topic: new_resource.kafka_topic
             )
             notifies :restart, "service[#{service_name}]", :delayed
           end

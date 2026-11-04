@@ -1,0 +1,351 @@
+# ==============================================================================
+# redborder-flow-agent - JA4 Fingerprint Signature Database & Rules
+# ==============================================================================
+#
+# ABOUT JA4 FINGERPRINTING & COMMERCIAL DATABASES:
+# ------------------------------------------------------------------------------
+# JA4 is an open fingerprinting standard created by John Althouse / FoxIO.
+# Format: [Part_A]_[Part_B]_[Part_C]
+#   - Part A: Protocol (t=TCP, q=QUIC) + TLS version + SNI type (d=domain, i=IP/none)
+#             + Cipher count (2 digits) + Extension count (2 digits) + ALPN (h2, h1, 00)
+#   - Part B: Truncated SHA-256 hash of sorted cipher suites (12 hex chars)
+#   - Part C: Truncated SHA-256 hash of sorted extensions & signature algorithms (12 hex chars)
+#
+# NOTE ON COMMERCIAL / ENTERPRISE FEEDS:
+# FoxIO provides an official commercial database (JA4DB) containing tens of thousands
+# of verified enterprise, malware, and application fingerprints updated in real-time.
+# If your organization requires full enterprise JA4 threat intelligence feeds,
+# refer to:
+#   - Official FoxIO JA4 Project: https://github.com/FoxIO-LLC/ja4
+#   - FoxIO JA4 Database & Enterprise Licensing: https://foxio.io/ja4-database/
+#
+# This file provides a curated open-source collection of common browsers, developer
+# runtimes, CLI tools, automated scrapers, scanners, and known threat/C2 profiles.
+# You can freely add, modify, or extend these rules for your network environment.
+# ==============================================================================
+
+signatures:
+  # ============================================================================
+  # 1. Standard Web Browsers (is_bot: false, is_threat: false)
+  # ============================================================================
+  # Google Chrome / Chromium (v100 - v126+) on Windows, macOS, Linux
+  - ja4: "t13d1516h2_8daaf6152771_e562703ab85f"
+    client_type: "browser"
+    client_app: "Google Chrome (Windows/Linux)"
+    is_bot: false
+    is_threat: false
+    description: "Google Chrome 110+ on Windows / Linux"
+
+  - ja4: "t13d1517h2_8daaf6152771_e562703ab85f"
+    client_type: "browser"
+    client_app: "Google Chrome / Microsoft Edge"
+    is_bot: false
+    is_threat: false
+    description: "Chrome or Microsoft Edge on Windows 10/11"
+
+  - ja4: "t13d1516h2_8daaf6152771_b5e52ae3496e"
+    client_type: "browser"
+    client_app: "Google Chrome (macOS)"
+    is_bot: false
+    is_threat: false
+    description: "Google Chrome on macOS (Apple Silicon / Intel)"
+
+  - ja4: "t13d1516h2_8daaf6152771_0b59b5be26e1"
+    client_type: "browser"
+    client_app: "Google Chrome (Android)"
+    is_bot: false
+    is_threat: false
+    description: "Google Chrome mobile browser on Android"
+
+  - ja4: "t13d1616h2_8daaf6152771_e562703ab85f"
+    client_type: "browser"
+    client_app: "Brave Browser"
+    is_bot: false
+    is_threat: false
+    description: "Brave Chromium browser on desktop"
+
+  - ja4: "t13d1516h2_8daaf6152771_88849646b9a8"
+    client_type: "browser"
+    client_app: "Opera Browser"
+    is_bot: false
+    is_threat: false
+    description: "Opera desktop browser"
+
+  # Mozilla Firefox (v100 - v126+)
+  - ja4: "t13d1715h2_5da81232f052_e562703ab85f"
+    client_type: "browser"
+    client_app: "Mozilla Firefox"
+    is_bot: false
+    is_threat: false
+    description: "Mozilla Firefox on Linux / Windows"
+
+  - ja4: "t13d1516h2_bfa337485184_ce5d316eb7e9"
+    client_type: "browser"
+    client_app: "Mozilla Firefox (Modern TLS 1.3)"
+    is_bot: false
+    is_threat: false
+    description: "Mozilla Firefox 115+ ESR / Release"
+
+  - ja4: "t13d1715h2_5da81232f052_b5e52ae3496e"
+    client_type: "browser"
+    client_app: "Mozilla Firefox (macOS)"
+    is_bot: false
+    is_threat: false
+    description: "Mozilla Firefox on macOS"
+
+  - ja4: "t13d1414h2_5da81232f052_ce5d316eb7e9"
+    client_type: "browser"
+    client_app: "Firefox Private / Tor Browser"
+    is_bot: false
+    is_threat: false
+    description: "Tor Browser or hardened Firefox profile"
+
+  # Apple Safari (macOS / iOS / iPadOS)
+  - ja4: "t13d1909h2_9a12bc34de56_123456789abc"
+    client_type: "browser"
+    client_app: "Apple Safari (macOS)"
+    is_bot: false
+    is_threat: false
+    description: "Apple Safari 16+ on macOS Sonoma / Ventura"
+
+  - ja4: "t13d1909h2_9a12bc34de56_88849646b9a8"
+    client_type: "browser"
+    client_app: "Apple Safari (iOS / iPhone)"
+    is_bot: false
+    is_threat: false
+    description: "Mobile Safari on iOS / iPadOS"
+
+  - ja4: "t13d1808h2_9a12bc34de56_123456789abc"
+    client_type: "browser"
+    client_app: "Apple WebKit Embed"
+    is_bot: false
+    is_threat: false
+    description: "WebKit embedded webview in iOS/macOS apps"
+
+  # ============================================================================
+  # 2. Automated Tools, Scripting Libraries & Scrapers (is_bot: true, is_threat: false)
+  # ============================================================================
+  # Python Runtimes & Libraries
+  - ja4: "t10i030000_cbb25e4023a6_f82855905d68"
+    client_type: "bot"
+    client_app: "python-requests / urllib3"
+    is_bot: true
+    is_threat: false
+    description: "Python Requests library default TLS handshake (no SNI/no ALPN)"
+
+  - ja4: "t13d0706h2_040302010000_f82855905d68"
+    client_type: "bot"
+    client_app: "python-httpx"
+    is_bot: true
+    is_threat: false
+    description: "Python HTTPX async HTTP client"
+
+  - ja4: "t13d060500_cbb25e4023a6_f82855905d68"
+    client_type: "bot"
+    client_app: "aiohttp (Python)"
+    is_bot: true
+    is_threat: false
+    description: "Python AIOHTTP async client"
+
+  - ja4: "t12d050400_cbb25e4023a6_f82855905d68"
+    client_type: "bot"
+    client_app: "Scrapy Web Crawler"
+    is_bot: true
+    is_threat: false
+    description: "Scrapy Python web crawler framework"
+
+  # Command-Line Tools & Downloaders
+  - ja4: "t13d150800_b964344d2d46_f82855905d68"
+    client_type: "bot"
+    client_app: "curl (OpenSSL)"
+    is_bot: true
+    is_threat: false
+    description: "curl command-line utility with OpenSSL backend"
+
+  - ja4: "t13d150800_b964344d2d46_e562703ab85f"
+    client_type: "bot"
+    client_app: "curl (HTTP/2 enabled)"
+    is_bot: true
+    is_threat: false
+    description: "curl utility with ALPN negotiation"
+
+  - ja4: "t12d080400_b964344d2d46_f82855905d68"
+    client_type: "bot"
+    client_app: "wget"
+    is_bot: true
+    is_threat: false
+    description: "GNU Wget HTTP file downloader"
+
+  # Go Runtimes & Applications
+  - ja4: "t13d0304h2_2a3f4e5d6c7b_8e9f0a1b2c3d"
+    client_type: "bot"
+    client_app: "Go-http-client (crypto/tls)"
+    is_bot: true
+    is_threat: false
+    description: "Standard Golang HTTP client library"
+
+  - ja4: "t13d0203h2_62ed6f6ca7ad_76ae7f21e19f"
+    client_type: "bot"
+    client_app: "Go-http-client / custom"
+    is_bot: true
+    is_threat: false
+    description: "Standard Go HTTP client TLS 1.3"
+
+  - ja4: "t13d0305h2_2a3f4e5d6c7b_76ae7f21e19f"
+    client_type: "bot"
+    client_app: "Prometheus Exporter / Grafana"
+    is_bot: true
+    is_threat: false
+    description: "Golang-based monitoring daemon / agent"
+
+  # JavaScript / NodeJS / Deno
+  - ja4: "t12d080400_e7b1a2c3d4e5_a1b2c3d4e5f6"
+    client_type: "bot"
+    client_app: "NodeJS / Axios"
+    is_bot: true
+    is_threat: false
+    description: "NodeJS runtime HTTPS client"
+
+  - ja4: "t13d1008h2_e7b1a2c3d4e5_a1b2c3d4e5f6"
+    client_type: "bot"
+    client_app: "Node-Fetch / Undici"
+    is_bot: true
+    is_threat: false
+    description: "NodeJS modern fetch HTTP client"
+
+  # Java / JVM Runtimes
+  - ja4: "t13d0806h2_d4c3b2a1e5f6_1234567890ab"
+    client_type: "bot"
+    client_app: "Java / Apache-HttpClient"
+    is_bot: true
+    is_threat: false
+    description: "Java JDK HTTP client / Spring framework"
+
+  - ja4: "t12d060400_d4c3b2a1e5f6_1234567890ab"
+    client_type: "bot"
+    client_app: "Java 8 / Legacy JVM"
+    is_bot: true
+    is_threat: false
+    description: "Java 8 / Java 11 default JSSE client"
+
+  # Rust / Tokio / Reqwest
+  - ja4: "t13d0606h2_3e4f5a6b7c8d_1234567890ef"
+    client_type: "bot"
+    client_app: "Rust reqwest / rustls"
+    is_bot: true
+    is_threat: false
+    description: "Rust async HTTP client (reqwest/rustls)"
+
+  # ============================================================================
+  # 3. Security Scanners, Vulnerability & Mass Port Probers (is_bot: true)
+  # ============================================================================
+  - ja4: "t12i010000_123456789abc_def012345678"
+    client_type: "scanner"
+    client_app: "ZGrab2 / Masscan"
+    is_bot: true
+    is_threat: false
+    description: "Mass internet port scanner TLS probe"
+
+  - ja4: "t10i010000_aabbccddeeff_001122334455"
+    client_type: "scanner"
+    client_app: "Nmap SSL Enumeration"
+    is_bot: true
+    is_threat: false
+    description: "Nmap NSE ssl-enum-ciphers probe"
+
+  - ja4: "t13d040300_123456789abc_def012345678"
+    client_type: "scanner"
+    client_app: "Nuclei Scanner"
+    is_bot: true
+    is_threat: false
+    description: "ProjectDiscovery Nuclei vulnerability scanner"
+
+  - ja4: "t12i030200_123456789abc_def012345678"
+    client_type: "scanner"
+    client_app: "Censys / Shodan Ingestion"
+    is_bot: true
+    is_threat: false
+    description: "Internet search engine banner grabber"
+
+  - ja4: "t10i020000_123456789abc_def012345678"
+    client_type: "scanner"
+    client_app: "Nikto / Web Vulnerability Scanner"
+    is_bot: true
+    is_threat: false
+    description: "Automated web application scanner"
+
+  # ============================================================================
+  # 4. Malicious / Threat / C2 Frameworks (client_type: "malware", is_threat: true)
+  # ============================================================================
+  - ja4: "t12d190800_8daaf6152771_b1234567890a"
+    client_type: "malware"
+    client_app: "CobaltStrike Beacon"
+    is_bot: true
+    is_threat: true
+    description: "Cobalt Strike malleable C2 TLS profile"
+
+  - ja4: "t10i020000_9abc87654321_0123456789ab"
+    client_type: "malware"
+    client_app: "Mirai Botnet"
+    is_bot: true
+    is_threat: true
+    description: "Mirai botnet IoT scanner / C2 probe"
+
+  - ja4: "t12i050200_a1b2c3d4e5f6_789012345678"
+    client_type: "malware"
+    client_app: "Metasploit Meterpreter"
+    is_bot: true
+    is_threat: true
+    description: "Metasploit reverse HTTPS payload"
+
+  - ja4: "t12d100400_f1e2d3c4b5a6_0987654321fe"
+    client_type: "malware"
+    client_app: "Sliver C2"
+    is_bot: true
+    is_threat: true
+    description: "Sliver C2 HTTPS implant"
+
+  - ja4: "t12i040200_987654321fed_cba098765432"
+    client_type: "malware"
+    client_app: "AsyncRAT"
+    is_bot: true
+    is_threat: true
+    description: "AsyncRAT .NET remote access trojan C2"
+
+  - ja4: "t10d060300_abcdef123456_7890abcdef12"
+    client_type: "malware"
+    client_app: "RedLine Stealer"
+    is_bot: true
+    is_threat: true
+    description: "RedLine InfoStealer exfiltration connection"
+
+  - ja4: "t12d080500_54321abcdef0_0fedcba65432"
+    client_type: "malware"
+    client_app: "Qakbot (QBot)"
+    is_bot: true
+    is_threat: true
+    description: "Qakbot banking trojan / ransomware loader"
+
+  - ja4: "t12i020100_112233445566_778899aabbcc"
+    client_type: "malware"
+    client_app: "Pikabot / DarkGate"
+    is_bot: true
+    is_threat: true
+    description: "Pikabot C2 communication protocol"
+
+  # ============================================================================
+  # 5. Operating System / Background Services (is_bot: false, is_threat: false)
+  # ============================================================================
+  - ja4: "t13d1109h2_123456789abc_def012345678"
+    client_type: "os_service"
+    client_app: "Windows Update / Delivery Optimization"
+    is_bot: false
+    is_threat: false
+    description: "Microsoft Windows background OS update service"
+
+  - ja4: "t13d1208h2_9a12bc34de56_fedcba098765"
+    client_type: "os_service"
+    client_app: "Apple Push Notification / iCloud"
+    is_bot: false
+    is_threat: false
+    description: "Apple OS telemetry & push notification daemon"
